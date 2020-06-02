@@ -212,9 +212,7 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
-  /*The thread yields if the new thread has highter priority*/
-  if (priority > thread_current () -> priority && thread_current () != idle_thread)
-    thread_yield();
+
 
   return tid;
 }
@@ -255,6 +253,15 @@ thread_unblock (struct thread *t)
   list_push_back (&ready_list[t->priority], &t->elem);
   t->status = THREAD_READY;
   intr_set_level (old_level);
+
+  /*The thread yields if the new thread has highter priority*/
+  if (t -> priority > thread_current () -> priority && thread_current () != idle_thread)
+  {
+    if (intr_context ())
+      intr_yield_on_return();
+    else
+      thread_yield();
+  }
 }
 
 /* Returns the name of the running thread. */
@@ -355,7 +362,11 @@ thread_set_priority (int new_priority)
   // If it decrements its priority, it yields
   if (old_priority > new_priority) 
   {
-    thread_yield();
+    /*Forces a context change, so the next thread waiting can run*/
+    if (intr_context ())
+      intr_yield_on_return();
+    else
+      thread_yield();
   }
 }
 

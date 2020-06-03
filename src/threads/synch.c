@@ -53,7 +53,8 @@ sema_init (struct semaphore *sema, unsigned value)
 
 /*Comparison function*/
 
-static bool comparator_by_priority (const struct list_elem* a, const struct list_elem *b, void* aux UNUSED)
+/*Returns true if a has higher priority than b*/
+static bool compare_thread_by_priority (const struct list_elem* a, const struct list_elem *b, void* aux UNUSED)
 {
   const struct thread* x = list_entry(a, struct thread, elem);
   const struct thread* y = list_entry(b, struct thread, elem);
@@ -79,7 +80,7 @@ sema_down (struct semaphore *sema)
   old_level = intr_disable ();
   while (sema->value == 0) 
     {
-      list_insert_ordered (&sema->waiters, &thread_current ()->elem, comparator_by_priority, NULL);
+      list_insert_ordered (&sema->waiters, &thread_current ()->elem, compare_thread_by_priority, NULL);
       thread_block ();
     }
   sema->value--;
@@ -262,7 +263,18 @@ struct semaphore_elem
   {
     struct list_elem elem;              /* List element. */
     struct semaphore semaphore;         /* This semaphore. */
+    int priority;
   };
+
+/*Comparison function*/
+/*Returns true if a has higher priority than b*/
+static bool compare_waiter_by_priority (const struct list_elem* a, const struct list_elem *b, void* aux UNUSED)
+{
+  const struct semaphore_elem* x = list_entry(a, struct semaphore_elem, elem);
+  const struct semaphore_elem* y = list_entry(b, struct semaphore_elem, elem);
+  ASSERT(x != NULL && y != NULL);
+  return x->priority > y->priority;
+}
 
 /* Initializes condition variable COND.  A condition variable
    allows one piece of code to signal a condition and cooperating
@@ -305,8 +317,9 @@ cond_wait (struct condition *cond, struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (lock_held_by_current_thread (lock));
   
+  waiter.priority =  thread_current () -> priority;
   sema_init (&waiter.semaphore, 0);
-  list_push_back (&cond->waiters, &waiter.elem);
+  list_insert_ordered (&cond->waiters, &waiter.elem, compare_waiter_by_priority, NULL);
   lock_release (lock);
   sema_down (&waiter.semaphore);
   lock_acquire (lock);

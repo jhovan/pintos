@@ -12,6 +12,12 @@ for test_name in $TESTS; do
     perl -I../.. ../../tests/threads/${test_name}.ck tests/threads/${test_name} tests/threads/${test_name}.result
 done
 
+MLFSQ_TESTS="mlfqs-load-1 mlfqs-load-60 mlfqs-load-avg mlfqs-recent-1 mlfqs-fair-2 mlfqs-fair-20 mlfqs-nice-2 mlfqs-nice-10 mlfqs-block"
+
+for test_name in $MLFSQ_TESTS; do
+    pintos -v -k -T 60 --qemu  -- -q  -mlfqs run ${test_name} < /dev/null 2> tests/threads/${test_name}.errors > tests/threads/${test_name}.output
+    perl -I../.. ../../tests/threads/${test_name}.ck tests/threads/${test_name} tests/threads/${test_name}.result
+done
+
+
 cd ..
-
-

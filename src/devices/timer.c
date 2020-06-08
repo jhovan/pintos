@@ -114,12 +114,12 @@ void
 timer_sleep (int64_t ticks) 
 {
   int64_t start = timer_ticks ();
-  struct sleeping_thread * st = malloc(sizeof(struct sleeping_thread));
-  st->thread = thread_current ();
-  st->wakeup_tick = start + ticks;
+  struct sleeping_thread st;
+  st.thread = thread_current ();
+  st.wakeup_tick = start + ticks;
 
   enum intr_level old_level = intr_disable ();
-  list_insert_ordered (&sleeping_list, &st->elem, comparator_by_wakeup, NULL);
+  list_insert_ordered (&sleeping_list, &st.elem, comparator_by_wakeup, NULL);
   thread_block();
   intr_set_level (old_level);
 

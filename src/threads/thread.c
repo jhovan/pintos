@@ -12,6 +12,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "threads/fix-point.h"
+#include "devices/timer.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -23,7 +24,7 @@
 
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
-static struct list ready_list[64];
+static struct list ready_list[PRI_MAX - PRI_MIN + 1];
 
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
@@ -54,6 +55,7 @@ static long long user_ticks;    /* # of timer ticks in user programs. */
 /* Scheduling. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
 static unsigned thread_ticks;   /* # of timer ticks since last yield. */
+static int load_avg;
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -91,7 +93,7 @@ thread_init (void)
   ASSERT (intr_get_level () == INTR_OFF);
 
   lock_init (&tid_lock);
-  for(int i = 0; i <= 63; i++) 
+  for(int i = PRI_MIN; i <= PRI_MAX; i++) 
   {
     list_init (&ready_list[i]);
   }
@@ -102,6 +104,8 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+  /* Initialize load_avg */
+  load_avg = 0;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -121,6 +125,51 @@ thread_start (void)
   sema_down (&idle_started);
 }
 
+
+/* Updates load_avg if necessary */
+void 
+update_load_avg () 
+{
+  /* If one second has passed */
+  if(timer_ticks() % TIMER_FREQ == 0) 
+  {
+    // starts at 1, because of the running thread
+    int ready_threads = 1;
+    for (int i = PRI_MIN; i <= PRI_MAX; i++) 
+    {
+      ready_threads += list_size(&ready_list[i]);
+    }
+    // idle thread should not be counted
+    if (idle_thread->status == THREAD_READY) 
+    {
+      ready_threads--;
+    }
+    load_avg = ADD_FP(MULT_FP(FRACT_TO_FIXPOINT(59, 60), load_avg), MULT_INT(FRACT_TO_FIXPOINT(1, 60), ready_threads));
+  }
+}
+
+
+/* Calculate recent_cpu */
+void
+calculate_recent_cpu (struct thread *t, void* aux UNUSED)
+{
+  int x = MULT_INT(load_avg, 2);
+  t->recent_cpu = ADD_INT(MULT_FP(DIV_FP(x, ADD_INT(x, 1)), t->recent_cpu), t->nice);
+}
+
+/* Updates recent_cpu */
+void 
+update_recent_cpu()
+{
+  if (thread_current() != idle_thread)
+    thread_current()->recent_cpu = ADD_INT(thread_current ()->recent_cpu ,1);
+  /* If one second has passed */
+  if(timer_ticks() % TIMER_FREQ == 0) 
+  {
+    thread_foreach(calculate_recent_cpu, NULL);
+  }
+}
+
 /* Called by the timer interrupt handler at each timer tick.
    Thus, this function runs in an external interrupt context. */
 void
@@ -137,6 +186,13 @@ thread_tick (void)
 #endif
   else
     kernel_ticks++;
+
+  if (thread_mlfqs)
+  {
+    /* Update necessary values */
+    update_load_avg();
+    update_recent_cpu();
+  }
 
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
@@ -212,8 +268,6 @@ thread_create (const char *name, int priority,
 
   /* Add to run queue. */
   thread_unblock (t);
-
-
 
   return tid;
 }
@@ -397,16 +451,14 @@ thread_get_nice (void)
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return ROUND(MULT_INT(load_avg,100));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return ROUND(MULT_INT(thread_current()->recent_cpu,100));
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -494,6 +546,16 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+
+  if (t == initial_thread)
+  {
+    t->recent_cpu = 0;
+  }
+  else 
+  {
+    t->recent_cpu = thread_current()->recent_cpu;
+  }
+
   list_push_back (&all_list, &t->allelem);
 }
 
@@ -518,7 +580,7 @@ alloc_frame (struct thread *t, size_t size)
 static struct thread *
 next_thread_to_run (void) 
 {
-  for(int i = 63; i >= 0; i--) 
+  for(int i = PRI_MAX; i >= PRI_MIN; i--) 
   {
     if(!list_empty (&ready_list[i]))
       return list_entry (list_pop_front (&ready_list[i]), struct thread, elem);

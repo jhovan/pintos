@@ -170,6 +170,36 @@ update_recent_cpu()
   }
 }
 
+
+/* Calculate priority */
+void
+calculate_priority (struct thread *t, void* aux UNUSED)
+{
+  int old_priority = t->priority;
+  t->priority = TRUNCATE(SUB_FP(0, SUB_INT(ADD_INT(DIV_INT(t->recent_cpu,4), t->nice * 2), PRI_MAX)));
+  if (t->priority > PRI_MAX)
+    t->priority = PRI_MAX;
+  if (t->priority > PRI_MIN)
+    t->priority = PRI_MIN;
+  // If priority changed, then we remove the thread from the ready_list and reinsert it
+  if (old_priority != t->priority && t->status == THREAD_READY) 
+  {
+    list_remove(&t->elem);
+    list_push_back (&ready_list[t->priority], &t->elem);
+  }
+}
+
+/* Updates priority */
+void 
+update_priority()
+{
+  /* If 4 ticks have passed */
+  if(timer_ticks() % 4 == 0) 
+  {
+    thread_foreach(calculate_priority, NULL);
+  }
+}
+
 /* Called by the timer interrupt handler at each timer tick.
    Thus, this function runs in an external interrupt context. */
 void
@@ -192,6 +222,7 @@ thread_tick (void)
     /* Update necessary values */
     update_load_avg();
     update_recent_cpu();
+    update_priority();
   }
 
   /* Enforce preemption. */
@@ -412,16 +443,19 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  int old_priority = thread_current ()->priority;
-  thread_current ()->priority = new_priority;
-  // If it decrements its priority, it yields
-  if (old_priority > new_priority) 
-  {
-    /*Forces a context change, so the next thread waiting can run*/
-    if (intr_context ())
-      intr_yield_on_return();
-    else
-      thread_yield();
+  if(!thread_mlfqs)
+  { 
+    int old_priority = thread_current ()->priority;
+    thread_current ()->priority = new_priority;
+    // If it decrements its priority, it yields
+    if (old_priority > new_priority) 
+    {
+      /*Forces a context change, so the next thread waiting can run*/
+      if (intr_context ())
+        intr_yield_on_return();
+      else
+        thread_yield();
+    }
   }
 }
 
@@ -544,7 +578,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
-  t->priority = priority;
+
   t->magic = THREAD_MAGIC;
 
   if (t == initial_thread)
@@ -554,6 +588,15 @@ init_thread (struct thread *t, const char *name, int priority)
   else 
   {
     t->recent_cpu = thread_current()->recent_cpu;
+  }
+
+  if(thread_mlfqs)
+  {
+    calculate_priority(t, NULL);
+  }
+  else
+  {
+    t->priority = priority;
   }
 
   list_push_back (&all_list, &t->allelem);

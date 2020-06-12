@@ -179,12 +179,12 @@ calculate_priority (struct thread *t, void* aux UNUSED)
   t->priority = TRUNCATE(SUB_FP(0, SUB_INT(ADD_INT(DIV_INT(t->recent_cpu,4), t->nice * 2), PRI_MAX)));
   if (t->priority > PRI_MAX)
     t->priority = PRI_MAX;
-  if (t->priority > PRI_MIN)
+  if (t->priority < PRI_MIN)
     t->priority = PRI_MIN;
   // If priority changed, then we remove the thread from the ready_list and reinsert it
-  if (old_priority != t->priority && t->status == THREAD_READY) 
+  if (old_priority != t->priority && t->status == THREAD_READY && t != idle_thread) 
   {
-    list_remove(&t->elem);
+    list_remove (&t->elem);
     list_push_back (&ready_list[t->priority], &t->elem);
   }
 }
@@ -468,17 +468,27 @@ thread_get_priority (void)
 
 /* Sets the current thread's nice value to NICE. */
 void
-thread_set_nice (int nice UNUSED) 
+thread_set_nice (int nice) 
 {
-  /* Not yet implemented. */
+  int old_priority = thread_current()->priority;
+  thread_current ()->nice = nice;
+  calculate_priority(thread_current(), NULL);
+  // If it decrements its priority, it yields
+  if (old_priority > thread_current()->priority) 
+  {
+    /*Forces a context change, so the next thread waiting can run*/
+    if (intr_context ())
+      intr_yield_on_return();
+    else
+      thread_yield();
+  }
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return thread_current ()->nice;
 }
 
 /* Returns 100 times the system load average. */
@@ -584,10 +594,12 @@ init_thread (struct thread *t, const char *name, int priority)
   if (t == initial_thread)
   {
     t->recent_cpu = 0;
+    t->nice = 0;
   }
   else 
   {
     t->recent_cpu = thread_current()->recent_cpu;
+    t->nice = thread_current()->nice;
   }
 
   if(thread_mlfqs)

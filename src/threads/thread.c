@@ -130,22 +130,20 @@ thread_start (void)
 void 
 update_load_avg () 
 {
-  /* If one second has passed */
-  if(timer_ticks() % TIMER_FREQ == 0) 
+  
+  // starts at 1, because of the running thread
+  int ready_threads = 1;
+  for (int i = PRI_MIN; i <= PRI_MAX; i++) 
   {
-    // starts at 1, because of the running thread
-    int ready_threads = 1;
-    for (int i = PRI_MIN; i <= PRI_MAX; i++) 
-    {
-      ready_threads += list_size(&ready_list[i]);
-    }
-    // idle thread should not be counted
-    if (idle_thread->status == THREAD_READY) 
-    {
-      ready_threads--;
-    }
-    load_avg = ADD_FP(MULT_FP(FRACT_TO_FIXPOINT(59, 60), load_avg), MULT_INT(FRACT_TO_FIXPOINT(1, 60), ready_threads));
+    ready_threads += list_size(&ready_list[i]);
   }
+  // idle thread should not be counted
+  if (idle_thread->status == THREAD_READY) 
+  {
+    ready_threads--;
+  }
+  load_avg = ADD_FP(MULT_FP(FRACT_TO_FIXPOINT(59, 60), load_avg), MULT_INT(FRACT_TO_FIXPOINT(1, 60), ready_threads));
+
 }
 
 
@@ -161,13 +159,7 @@ calculate_recent_cpu (struct thread *t, void* aux UNUSED)
 void 
 update_recent_cpu()
 {
-  if (thread_current() != idle_thread)
-    thread_current()->recent_cpu = ADD_INT(thread_current ()->recent_cpu ,1);
-  /* If one second has passed */
-  if(timer_ticks() % TIMER_FREQ == 0) 
-  {
-    thread_foreach(calculate_recent_cpu, NULL);
-  }
+  thread_foreach(calculate_recent_cpu, NULL);
 }
 
 
@@ -193,11 +185,7 @@ calculate_priority (struct thread *t, void* aux UNUSED)
 void 
 update_priority()
 {
-  /* If 4 ticks have passed */
-  if(timer_ticks() % 4 == 0) 
-  {
-    thread_foreach(calculate_priority, NULL);
-  }
+  thread_foreach(calculate_priority, NULL);
 }
 
 /* Called by the timer interrupt handler at each timer tick.
@@ -219,10 +207,19 @@ thread_tick (void)
 
   if (thread_mlfqs)
   {
+    /* Increments recent_cpu in 1 for current thread*/
+    if (thread_current() != idle_thread)
+      thread_current()->recent_cpu = ADD_INT(thread_current ()->recent_cpu ,1);
     /* Update necessary values */
-    update_load_avg();
-    update_recent_cpu();
-    update_priority();
+    /* If one second has passed */
+    if(timer_ticks() % TIMER_FREQ == 0) 
+    {
+      update_load_avg();
+      update_recent_cpu();
+    }
+    /* If 4 ticks have passed */
+    if(timer_ticks() % 4 == 0) 
+      update_priority();
   }
 
   /* Enforce preemption. */
